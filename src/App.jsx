@@ -28,7 +28,7 @@ import {
 // Vite only exposes env vars prefixed with `VITE_`
 // Create `heartsync-app/.env` locally with: VITE_GEMINI_API_KEY=...
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
-const MODEL_NAME = "gemini-2.5-flash-preview-09-2025";
+const MODEL_NAME = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash";
 
 const TRANSLATIONS = {
   zh: {
@@ -228,11 +228,36 @@ export default function App() {
         })
       });
       const result = await response.json();
-      const text = result.candidates[0].content.parts[0].text;
-      setCards(JSON.parse(text));
+      if (!response.ok) {
+        throw new Error(result.error?.message || `HTTP ${response.status}`);
+      }
+      const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) {
+        throw new Error("No response content from model");
+      }
+      let cleanedText = rawText.trim();
+      if (cleanedText.startsWith('```json')) {
+        cleanedText = cleanedText.slice(7).replace(/```$/, '').trim();
+      } else if (cleanedText.startsWith('```')) {
+        cleanedText = cleanedText.slice(3).replace(/```$/, '').trim();
+      }
+      let parsed = JSON.parse(cleanedText);
+      if (!Array.isArray(parsed)) {
+        if (Array.isArray(parsed.cards)) parsed = parsed.cards;
+        else if (Array.isArray(parsed.questions)) parsed = parsed.questions;
+        else {
+          const firstArray = Object.values(parsed).find(val => Array.isArray(val));
+          if (firstArray) parsed = firstArray;
+        }
+      }
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error("Failed to parse cards array");
+      }
+      setCards(parsed);
       setTimeout(() => { setStep('gallery'); setHoveredCardIndex(null); }, 1000);
     } catch (err) {
-      setError(lang === 'zh' ? "对话引擎暂未响应。" : "Conversation engine not responding.");
+      console.error("Generate cards failed:", err);
+      setError(lang === 'zh' ? `对话引擎暂未响应（${err.message || "请求失败"}）` : `Conversation engine not responding (${err.message || "Request failed"})`);
       setStep('input');
     }
   };
